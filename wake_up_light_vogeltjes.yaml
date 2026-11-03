@@ -1,0 +1,282 @@
+blueprint:
+  name: Wake-up light met vogeltjes
+  description: >
+    Een zachte zonsopkomst van ongeveer 25 minuten op een kleurenlamp: aan op 1%,
+    daarna dieprood en heel geleidelijk via oranje en amber naar warm wit en tot slot
+    100% op 3000K. De overgang van kleur naar wit gebeurt bij een amberkleur die al
+    vrijwel gelijk is aan 2200K, zodat er geen zichtbare sprong is.
+
+
+    Na een in te stellen aantal minuten starten zachte vogelgeluiden (of andere muziek)
+    via Music Assistant. Die stoppen automatisch een in te stellen tijd nadat de lamp
+    op volle helderheid is. Later gaat ook de lamp weer uit.
+
+
+    Zet je de lamp tussendoor zelf uit, dan stopt de lichtreeks. De muziek stopt nog
+    steeds op het ingestelde moment.
+
+
+    Vereisten: een lamp die kleur (hs_color) en kleurtemperatuur ondersteunt, zoals
+    een Philips Hue color. Voor het geluid een Music Assistant-speler.
+  domain: automation
+  author: Jeroen
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    tijd_en_dagen:
+      name: Tijd en dagen
+      icon: mdi:alarm
+      input:
+        wektijd:
+          name: Wektijd
+          description: Een input_datetime-helper (alleen tijd) met het starttijdstip van de zonsopkomst.
+          selector:
+            entity:
+              filter:
+                - domain: input_datetime
+        dagen:
+          name: Dagen
+          description: Op welke dagen de wekker afgaat.
+          default: [mon, tue, wed, thu, fri]
+          selector:
+            select:
+              multiple: true
+              mode: list
+              options:
+                - label: Maandag
+                  value: mon
+                - label: Dinsdag
+                  value: tue
+                - label: Woensdag
+                  value: wed
+                - label: Donderdag
+                  value: thu
+                - label: Vrijdag
+                  value: fri
+                - label: Zaterdag
+                  value: sat
+                - label: Zondag
+                  value: sun
+    licht:
+      name: Licht
+      icon: mdi:weather-sunset-up
+      input:
+        lamp:
+          name: Lamp
+          description: Een kleurenlamp (bij voorkeur Hue; WiZ via Matter kan flitsen bij overgangen).
+          selector:
+            entity:
+              filter:
+                - domain: light
+        lamp_uit_na:
+          name: Lamp uit na
+          description: Hoeveel minuten na volle helderheid de lamp weer uitgaat.
+          default: 16
+          selector:
+            number:
+              min: 1
+              max: 120
+              unit_of_measurement: min
+    geluid:
+      name: Geluid
+      icon: mdi:bird
+      collapsed: true
+      input:
+        speaker:
+          name: Speaker
+          description: Een Music Assistant-speler. Laat leeg voor alleen licht.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: media_player
+                  integration: music_assistant
+        media_id:
+          name: Wat afspelen
+          description: >
+            Een Music Assistant-URI of zoekterm, bijvoorbeeld een Spotify-afspeellijst-URI
+            of gewoon "Rustgevende vogelgeluiden".
+          default: "Rustgevende vogelgeluiden"
+          selector:
+            text:
+        media_type:
+          name: Soort media
+          default: playlist
+          selector:
+            select:
+              options:
+                - label: Afspeellijst
+                  value: playlist
+                - label: Nummer
+                  value: track
+                - label: Album
+                  value: album
+                - label: Radiozender
+                  value: radio
+        volume:
+          name: Volume
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 100
+              unit_of_measurement: "%"
+        geluid_start_na:
+          name: Geluid start na
+          description: Hoeveel minuten na het begin van de zonsopkomst het geluid start.
+          default: 5
+          selector:
+            number:
+              min: 0
+              max: 25
+              unit_of_measurement: min
+        geluid_stop_na:
+          name: Geluid stopt na
+          description: Hoeveel minuten na volle helderheid het geluid stopt.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 120
+              unit_of_measurement: min
+
+mode: single
+
+variables:
+  lamp: !input lamp
+  speaker: !input speaker
+  volume: !input volume
+  geluid_start_na: !input geluid_start_na
+  geluid_stop_na: !input geluid_stop_na
+  lamp_uit_na: !input lamp_uit_na
+  # Duur van de hele lichtreeks tot 100%: 1 + 300 + 3x240 + 3 + 2x240 seconden.
+  tot_vol_seconden: 1504
+
+triggers:
+  - trigger: time
+    at: !input wektijd
+
+conditions:
+  - condition: time
+    weekday: !input dagen
+
+actions:
+  - parallel:
+      # Licht
+      - sequence:
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              brightness_pct: 1
+          - delay:
+              seconds: 1
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              hs_color: [5, 100]
+              brightness_pct: 1
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              hs_color: [5, 100]
+              brightness_pct: 6
+              transition: 300
+          - delay:
+              seconds: 300
+          - condition: template
+            value_template: "{{ is_state(lamp, 'on') }}"
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              hs_color: [12, 100]
+              brightness_pct: 15
+              transition: 240
+          - delay:
+              seconds: 240
+          - condition: template
+            value_template: "{{ is_state(lamp, 'on') }}"
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              hs_color: [20, 95]
+              brightness_pct: 25
+              transition: 240
+          - delay:
+              seconds: 240
+          - condition: template
+            value_template: "{{ is_state(lamp, 'on') }}"
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              hs_color: [28, 80]
+              brightness_pct: 38
+              transition: 240
+          - delay:
+              seconds: 240
+          - condition: template
+            value_template: "{{ is_state(lamp, 'on') }}"
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              color_temp_kelvin: 2200
+              brightness_pct: 40
+              transition: 3
+          - delay:
+              seconds: 3
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              color_temp_kelvin: 2700
+              brightness_pct: 65
+              transition: 240
+          - delay:
+              seconds: 240
+          - condition: template
+            value_template: "{{ is_state(lamp, 'on') }}"
+          - action: light.turn_on
+            target:
+              entity_id: "{{ lamp }}"
+            data:
+              color_temp_kelvin: 3000
+              brightness_pct: 100
+              transition: 240
+          - delay:
+              seconds: "{{ 240 + lamp_uit_na * 60 }}"
+          - action: light.turn_off
+            target:
+              entity_id: "{{ lamp }}"
+
+      # Geluid
+      - sequence:
+          - condition: template
+            value_template: "{{ speaker not in ['', none] }}"
+          - delay:
+              seconds: "{{ geluid_start_na * 60 }}"
+          - action: media_player.volume_set
+            target:
+              entity_id: "{{ speaker }}"
+            data:
+              volume_level: "{{ volume / 100 }}"
+            continue_on_error: true
+          - action: music_assistant.play_media
+            target:
+              entity_id: "{{ speaker }}"
+            data:
+              media_id: !input media_id
+              media_type: !input media_type
+              enqueue: replace
+            continue_on_error: true
+          - delay:
+              seconds: "{{ [tot_vol_seconden + geluid_stop_na * 60 - geluid_start_na * 60, 0] | max }}"
+          - action: media_player.media_stop
+            target:
+              entity_id: "{{ speaker }}"
+            continue_on_error: true
