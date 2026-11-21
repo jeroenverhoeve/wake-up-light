@@ -1,14 +1,14 @@
 blueprint:
   name: Wake-up light met vogelgeluiden
   description: >-
-    Kunstmatige zonsopkomst van ongeveer 17 minuten: de lamp gaat direct aan op 1% oranjerood
-    (zonder witte flits), wordt oranje, amber en daarna warm wit tot 100% op 3000 K.
-    Tegelijk start na een instelbare tijd een afspeellijst (bijvoorbeeld vogelgeluiden) via
-    Music Assistant, die een instelbare tijd na vol licht weer stopt, ook als de lamp eerder
-    is uitgezet. Wordt de lamp tussendoor uitgezet, dan stopt het lichtverloop.
+    Kunstmatige zonsopkomst met instelbare duur: de lamp gaat direct aan op 1% oranjerood
+    (zonder witte flits), wordt oranje, amber en daarna warm wit tot de ingestelde
+    eindhelderheid en kleurtemperatuur. Alle stappen schalen mee met de duur.
+    Tegelijk start na een instelbare tijd een afspeellijst via Music Assistant, die een
+    instelbare tijd na vol licht weer stopt, ook als de lamp eerder is uitgezet.
+    Wordt de lamp tussendoor uitgezet, dan stopt het lichtverloop.
   domain: automation
-  author: JOUW-GITHUB-NAAM
-  source_url: https://github.com/JOUW-GITHUB-NAAM/JOUW-REPO/blob/main/wake_up_light_vogels.yaml
+  author: Jeroen
   homeassistant:
     min_version: "2024.10.0"
   input:
@@ -18,7 +18,7 @@ blueprint:
       input:
         wake_time:
           name: Wektijd
-          description: Een tijd-helper (input_datetime met alleen tijd), zodat je de tijd op een dashboard kunt aanpassen.
+          description: Een tijd-helper (input_datetime met alleen tijd).
           selector:
             entity:
               domain: input_datetime
@@ -47,9 +47,25 @@ blueprint:
           selector:
             entity:
               domain: light
+        duration:
+          name: Duur zonsopkomst
+          description: Minuten van 1% tot de eindhelderheid. Alle kleurstappen schalen mee.
+          default: 17
+          selector:
+            number: { min: 3, max: 60, unit_of_measurement: min, mode: box }
+        end_brightness:
+          name: Eindhelderheid
+          default: 100
+          selector:
+            number: { min: 10, max: 100, unit_of_measurement: "%", mode: slider }
+        end_kelvin:
+          name: Eindkleurtemperatuur
+          default: 3000
+          selector:
+            number: { min: 2200, max: 6500, step: 100, unit_of_measurement: K, mode: box }
         light_off_after:
           name: Lamp uit na vol licht
-          description: Minuten na het bereiken van 100% dat de lamp weer uitgaat (0 = blijft aan).
+          description: Minuten na het bereiken van de eindstand dat de lamp uitgaat (0 = blijft aan).
           default: 16
           selector:
             number: { min: 0, max: 120, unit_of_measurement: min, mode: box }
@@ -70,9 +86,7 @@ blueprint:
               integration: music_assistant
         media_id:
           name: Afspeellijst
-          description: >-
-            Music Assistant-media-id of URI van de afspeellijst. Tip: start de afspeellijst
-            één keer in Music Assistant en kopieer de URI uit het menu van de afspeellijst.
+          description: Music Assistant-media-id of URI van de afspeellijst.
           selector:
             text: {}
         volume:
@@ -88,7 +102,7 @@ blueprint:
             number: { min: 0, max: 30, unit_of_measurement: min, mode: box }
         sound_stop_after:
           name: Geluid stopt na vol licht
-          description: Minuten na het bereiken van 100% licht dat het geluid stopt.
+          description: Minuten na het bereiken van de eindstand dat het geluid stopt.
           default: 10
           selector:
             number: { min: 0, max: 120, unit_of_measurement: min, mode: box }
@@ -98,13 +112,29 @@ max_exceeded: silent
 
 variables:
   lamp: !input wake_light
+  duration_min: !input duration
+  end_bri: !input end_brightness
+  end_k: !input end_kelvin
+  light_off_min: !input light_off_after
   sound_on: !input sound_enabled
   sound_delay_min: !input sound_delay
   sound_stop_min: !input sound_stop_after
   volume_pct: !input volume
-  light_off_min: !input light_off_after
-  # Het lichtverloop duurt 1025 seconden tot 100%.
-  sound_duration_s: "{{ [1025 - (sound_delay_min | int) * 60 + (sound_stop_min | int) * 60, 60] | max }}"
+  # Stappen: hs = kleur, kf = positie tussen 2200 K en eindkleurtemperatuur,
+  # bri = % van de eindhelderheid, w = aandeel in de duur (w 0 = vaste 3 s overgang).
+  steps:
+    - { hs: [18, 100], bri: 6, w: 2 }
+    - { hs: [24, 95], bri: 16, w: 3 }
+    - { hs: [28, 85], bri: 28, w: 3 }
+    - { hs: [30, 75], bri: 42, w: 3 }
+    - { kf: 0, bri: 44, w: 0 }
+    - { kf: 0.625, bri: 72, w: 3 }
+    - { kf: 1, bri: 100, w: 3 }
+  duration_s: "{{ (duration_min | float) * 60 }}"
+  # 2 s startmoment + 3 s wissel naar kleurtemperatuur gaan van de duur af.
+  ramp_s: "{{ [duration_s - 5, 60] | max }}"
+  w_total: "{{ steps | map(attribute='w') | sum }}"
+  sound_duration_s: "{{ [duration_s - (sound_delay_min | int) * 60 + (sound_stop_min | int) * 60, 60] | max }}"
 
 triggers:
   - trigger: time
@@ -121,46 +151,29 @@ actions:
             target: { entity_id: "{{ lamp }}" }
             data: { hs_color: [12, 100], brightness_pct: 1 }
           - delay: { seconds: 2 }
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { hs_color: [18, 100], brightness_pct: 6, transition: 120 }
-          - delay: { seconds: 120 }
+          - repeat:
+              for_each: "{{ steps }}"
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ is_state(lamp, 'on') }}"
+                  then:
+                    - variables:
+                        s: "{{ repeat.item }}"
+                        t: "{{ ((s.w / w_total) * ramp_s) | round(1) if s.w > 0 else 3 }}"
+                        b: "{{ [((s.bri * end_bri) / 100) | round(0) | int, 1] | max }}"
+                    - action: light.turn_on
+                      target: { entity_id: "{{ lamp }}" }
+                      data: >-
+                        {% if s.hs is defined %}
+                          {{ {'hs_color': s.hs, 'brightness_pct': b, 'transition': t} }}
+                        {% else %}
+                          {{ {'color_temp_kelvin': (2200 + (end_k - 2200) * s.kf) | int,
+                              'brightness_pct': b, 'transition': t} }}
+                        {% endif %}
+                    - delay: { seconds: "{{ t }}" }
           - condition: template
-            value_template: "{{ is_state(lamp, 'on') }}"
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { hs_color: [24, 95], brightness_pct: 16, transition: 180 }
-          - delay: { seconds: 180 }
-          - condition: template
-            value_template: "{{ is_state(lamp, 'on') }}"
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { hs_color: [28, 85], brightness_pct: 28, transition: 180 }
-          - delay: { seconds: 180 }
-          - condition: template
-            value_template: "{{ is_state(lamp, 'on') }}"
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { hs_color: [30, 75], brightness_pct: 42, transition: 180 }
-          - delay: { seconds: 180 }
-          - condition: template
-            value_template: "{{ is_state(lamp, 'on') }}"
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { color_temp_kelvin: 2200, brightness_pct: 44, transition: 3 }
-          - delay: { seconds: 3 }
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { color_temp_kelvin: 2700, brightness_pct: 72, transition: 180 }
-          - delay: { seconds: 180 }
-          - condition: template
-            value_template: "{{ is_state(lamp, 'on') }}"
-          - action: light.turn_on
-            target: { entity_id: "{{ lamp }}" }
-            data: { color_temp_kelvin: 3000, brightness_pct: 100, transition: 180 }
-          - delay: { seconds: 180 }
-          - condition: template
-            value_template: "{{ (light_off_min | int) > 0 }}"
+            value_template: "{{ (light_off_min | int) > 0 and is_state(lamp, 'on') }}"
           - delay: { minutes: "{{ light_off_min | int }}" }
           - action: light.turn_off
             target: { entity_id: "{{ lamp }}" }
