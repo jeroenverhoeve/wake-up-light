@@ -88,8 +88,9 @@ blueprint:
         media_id:
           name: Afspeellijst
           description: Music Assistant-media-id of URI van de afspeellijst.
+          default: spotify--BBULG97m://playlist/4qCgX72abNlDfqsnzY7CxX
           selector:
-            text: {}
+            text: {}       
         volume:
           name: Volume
           default: 30
