@@ -7,6 +7,7 @@ blueprint:
     Tegelijk start na een instelbare tijd een afspeellijst via Music Assistant, die een
     instelbare tijd na vol licht weer stopt, ook als de lamp eerder is uitgezet.
     Wordt de lamp tussendoor uitgezet, dan stopt het lichtverloop.
+    De vogeltjes lijst is spotify--BBULG97m://playlist/4qCgX72abNlDfqsnzY7CxX
   domain: automation
   author: Jeroen
   homeassistant:
